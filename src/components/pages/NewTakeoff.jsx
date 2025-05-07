@@ -1,7 +1,8 @@
 // src/components/pages/NewTakeoff.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Cloud, Calculator, X, FileText } from 'lucide-react';
+import { Upload, Cloud, Calculator, X, FileText, RefreshCw } from 'lucide-react';
+import axios from 'axios'; // Make sure to import axios
 import { useApp } from '../../context/AppContext';
 import { analyzeRoofPlans } from '../../services/openai';
 
@@ -24,6 +25,19 @@ function NewTakeoff() {
     date: new Date().toISOString().split('T')[0],
     type: 'Residential'
   });
+  
+  const [currentProject, setCurrentProject] = useState(null);
+  const [pollingInterval, setPollingInterval] = useState(null);
+  const [checkingResults, setCheckingResults] = useState(false);
+  
+  // Clean up polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
   
   // Handle project details changes
   const handleInputChange = (e) => {
@@ -49,63 +63,104 @@ function NewTakeoff() {
     }
   };
   
-  // Process files - now waits for complete analysis
-// Process files with background function
-const processFiles = async () => {
-  // Validation code unchanged
+  // Check for analysis results
+  const checkResults = async (projectId) => {
+    if (checkingResults) return;
+    
+    try {
+      setCheckingResults(true);
+      console.log("Checking results for project:", projectId);
+      
+      const response = await axios.get(
+        `/.netlify/functions/get-analysis-result?projectId=${projectId}`
+      );
+      
+      console.log("Results check response:", response.status, response.data);
+      
+      if (response.status === 200) {
+        // We have results
+        completeAnalysis(response.data);
+        navigate(`/takeoff-result/${projectId}`);
+        return true;
+      }
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.log("Results not ready yet");
+        return false;
+      } else {
+        console.error("Error checking results:", error);
+        alert(`Error checking results: ${error.message}`);
+      }
+    } finally {
+      setCheckingResults(false);
+    }
+    
+    return false;
+  };
   
-  try {
-    // Create a new project
-    const newProject = addProject(projectDetails);
+  // Process files with background function
+  const processFiles = async () => {
+    // Validate project details
+    if (!projectDetails.name.trim()) {
+      alert('Please enter a project name');
+      return;
+    }
     
-    // Start analysis process
-    startAnalysis();
+    // Validate files
+    if (files.length === 0) {
+      alert('Please upload at least one file');
+      return;
+    }
     
-    // Call background function to start processing
-    await axios.post('/.netlify/functions/analyze-roof-background', {
-      image: base64Image,
-      projectDetails: {
-        ...projectDetails,
-        projectId: newProject.id
+    try {
+      // Create a new project
+      const newProject = addProject(projectDetails);
+      setCurrentProject(newProject);
+      
+      // Start analysis process
+      startAnalysis();
+      
+      // Get the image file and convert to base64
+      const imageFile = files.find(file => file.type.startsWith('image/'));
+      if (!imageFile || !imageFile.data) {
+        throw new Error('No valid image file selected');
       }
-    });
-    
-    // Start polling for results
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await axios.get(
-          `/.netlify/functions/get-analysis-result?projectId=${newProject.id}`
-        );
-        
-        // If we got a 200 response, we have results
-        console.log("Poll response:", response.status, response.data);
-        
-        if (response.status === 200) {
-          clearInterval(pollInterval);
-          completeAnalysis(response.data);
-          navigate(`/takeoff-result/${newProject.id}`);
+      
+      // Convert to base64
+      const base64Image = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(imageFile.data);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+      });
+      
+      // Call background function to start processing
+      await axios.post('/.netlify/functions/analyze-roof-background', {
+        image: base64Image,
+        projectDetails: {
+          ...projectDetails,
+          projectId: newProject.id
         }
-      } catch (error) {
-        // If we get a 404, results aren't ready yet
-        if (error.response && error.response.status === 404) {
-          console.log("Results not ready yet, continuing to poll...");
-        } else {
-          console.error("Error polling for results:", error);
+      });
+      
+      console.log("Background processing started for project:", newProject.id);
+      
+      // Start polling for results
+      const interval = setInterval(async () => {
+        const hasResults = await checkResults(newProject.id);
+        if (hasResults) {
+          clearInterval(interval);
         }
-      }
-    }, 5000); // Check every 5 seconds
-    
-    // Store the interval in state so we can clear it if component unmounts
-    setPollingInterval(pollInterval);
-    
-    // Make sure to clear the interval when component unmounts
-    return () => clearInterval(pollInterval);
-  } catch (error) {
-    console.error('Error starting analysis:', error);
-    alert(`Failed to start analysis: ${error.message}`);
-    startAnalysis(false);
-  }
-};
+      }, 5000); // Check every 5 seconds
+      
+      setPollingInterval(interval);
+      
+    } catch (error) {
+      console.error('Error starting analysis:', error);
+      alert(`Failed to start analysis: ${error.message}`);
+      startAnalysis(false);
+    }
+  };
   
   return (
     <div className="p-6">
@@ -227,55 +282,43 @@ const processFiles = async () => {
                 ))}
               </div>
               
-              <button 
-                className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2 disabled:bg-blue-300"
-                onClick={processFiles}
-                disabled={isProcessing}
-              >
+              {!isProcessing ? (
                 <button 
-  onClick={async () => {
-    try {
-      const response = await axios.get(
-        `/.netlify/functions/get-analysis-result?projectId=${currentProject.id}`
-      );
-      
-      if (response.status === 200) {
-        completeAnalysis(response.data);
-        navigate(`/takeoff-result/${currentProject.id}`);
-      } else {
-        alert("Results not ready yet. Please wait a bit longer.");
-      }
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        alert("Results not ready yet. Please wait a bit longer.");
-      } else {
-        console.error("Error checking results:", error);
-        alert(`Error checking results: ${error.message}`);
-      }
-    }
-  }}
-  className="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition"
->
-  Check for Results
-</button>
-                {isProcessing ? (
-                  <>
-                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                    Processing Files... (this may take 20-30 seconds)
-                  </>
-                ) : (
-                  <>
-                    <Calculator size={18} />
-                    Process with AI
-                  </>
-                )}
-              </button>
-              
-              {isProcessing && (
-                <div className="mt-4 bg-blue-50 p-4 rounded-lg">
-                  <p className="text-sm text-center text-gray-600">
-                    AI is analyzing your roof image. This process may take 20-30 seconds. Please wait...
-                  </p>
+                  className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                  onClick={processFiles}
+                >
+                  <Calculator size={18} />
+                  Process with AI
+                </button>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <div className="flex items-center justify-center mb-2">
+                      <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
+                      <p className="text-blue-700">Processing in Background...</p>
+                    </div>
+                    <p className="text-sm text-center text-gray-600">
+                      AI is analyzing your roof image. This may take 1-2 minutes.
+                    </p>
+                  </div>
+                  
+                  <button 
+                    className="w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:bg-green-300"
+                    onClick={() => currentProject && checkResults(currentProject.id)}
+                    disabled={checkingResults}
+                  >
+                    {checkingResults ? (
+                      <>
+                        <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                        Checking Results...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={18} />
+                        Check for Results
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
             </div>
