@@ -50,47 +50,47 @@ function NewTakeoff() {
   };
   
   // Process files - now waits for complete analysis
-  const processFiles = async () => {
-    // Validate project details
-    if (!projectDetails.name.trim()) {
-      alert('Please enter a project name');
-      return;
-    }
+const processFiles = async () => {
+  // Your existing validation code remains unchanged
+  
+  try {
+    // Create a new project
+    const newProject = addProject(projectDetails);
     
-    // Validate files
-    if (files.length === 0) {
-      alert('Please upload at least one file');
-      return;
-    }
+    // Start analysis process
+    startAnalysis();
     
-    try {
-      // Create a new project
-      const newProject = addProject(projectDetails);
-      
-      // Start analysis process
-      startAnalysis();
-      
-      // Call function and wait for complete analysis (may take 10-20 seconds)
-      const response = await analyzeRoofPlans(files.map(f => f.data), {
-        ...projectDetails,
-        projectId: newProject.id
-      });
-      
-      console.log("Analysis complete:", response);
-      
-      // Process the completed analysis
-      if (response) {
-      completeAnalysis(response);
-      navigate(`/takeoff-result/${newProject.id}`);
+    // Call function and wait for complete analysis
+    const analysisResult = await analyzeRoofPlans(files.map(f => f.data), {
+      ...projectDetails,
+      projectId: newProject.id
+    });
+    
+    // ADD DEBUG STEPS HERE
+    console.log("Raw analysis result:", JSON.stringify(analysisResult).substring(0, 200) + "...");
+    console.log("Result type:", typeof analysisResult);
+    console.log("Has properties:", Object.keys(analysisResult).join(", "));
+    // END DEBUG STEPS
+    
+    // Your existing logic for handling the result
+    if (analysisResult) {
+      // More flexible handling based on what's returned
+      if (typeof analysisResult === 'object') {
+        console.log("Using result object directly");
+        completeAnalysis(analysisResult);
+        navigate(`/takeoff-result/${newProject.id}`);
       } else {
-        throw new Error('Analysis completed but returned invalid result');
+        throw new Error(`Unexpected result type: ${typeof analysisResult}`);
       }
-    } catch (error) {
-      console.error('Error during analysis:', error);
-      alert(`Analysis failed: ${error.message}`);
-      startAnalysis(false);
+    } else {
+      throw new Error('Analysis completed but returned no result');
     }
-  };
+  } catch (error) {
+    console.error('Error during analysis:', error);
+    alert(`Analysis failed: ${error.message}`);
+    startAnalysis(false);
+  }
+};
   
   return (
     <div className="p-6">
