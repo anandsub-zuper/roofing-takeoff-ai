@@ -64,39 +64,39 @@ function NewTakeoff() {
   };
   
   // Check for analysis results
-  const checkResults = async (projectId) => {
-    if (checkingResults) return;
+  // In your checkResults function in NewTakeoff.jsx
+const checkResults = async (projectId) => {
+  if (checkingResults) return;
+  
+  try {
+    setCheckingResults(true);
+    console.log("Checking results for project:", projectId);
     
-    try {
-      setCheckingResults(true);
-      console.log("Checking results for project:", projectId);
-      
-      const response = await axios.get(
-        `/.netlify/functions/get-analysis-result?projectId=${projectId}`
-      );
-      
-      console.log("Results check response:", response.status, response.data);
-      
-      if (response.status === 200) {
-        // We have results
-        completeAnalysis(response.data);
-        navigate(`/takeoff-result/${projectId}`);
-        return true;
-      }
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        console.log("Results not ready yet");
-        return false;
-      } else {
-        console.error("Error checking results:", error);
-        alert(`Error checking results: ${error.message}`);
-      }
-    } finally {
-      setCheckingResults(false);
+    const response = await axios.get(
+      `/.netlify/functions/get-analysis-result?projectId=${projectId}`
+    );
+    
+    console.log("Results check response:", response.status, response.data);
+    
+    if (response.status === 200 && response.data) {
+      // We have results
+      completeAnalysis(response.data);
+      navigate(`/takeoff-result/${projectId}`);
+      return true;
     }
-    
-    return false;
-  };
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      console.log("Results not ready yet");
+      return false;
+    } else {
+      console.error("Error checking results:", error);
+    }
+  } finally {
+    setCheckingResults(false);
+  }
+  
+  return false;
+};
   
   // Process files with background function
   const processFiles = async () => {
