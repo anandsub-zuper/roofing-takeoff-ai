@@ -50,8 +50,9 @@ function NewTakeoff() {
   };
   
   // Process files - now waits for complete analysis
+// Process files with background function
 const processFiles = async () => {
-  // Your existing validation code remains unchanged
+  // Validation code unchanged
   
   try {
     // Create a new project
@@ -60,34 +61,48 @@ const processFiles = async () => {
     // Start analysis process
     startAnalysis();
     
-    // Call function and wait for complete analysis
-    const analysisResult = await analyzeRoofPlans(files.map(f => f.data), {
-      ...projectDetails,
-      projectId: newProject.id
+    // Call background function to start processing
+    await axios.post('/.netlify/functions/analyze-roof-background', {
+      image: base64Image,
+      projectDetails: {
+        ...projectDetails,
+        projectId: newProject.id
+      }
     });
     
-    // ADD DEBUG STEPS HERE
-    console.log("Raw analysis result:", JSON.stringify(analysisResult).substring(0, 200) + "...");
-    console.log("Result type:", typeof analysisResult);
-    console.log("Has properties:", Object.keys(analysisResult).join(", "));
-    // END DEBUG STEPS
-    
-    // Your existing logic for handling the result
-    if (analysisResult) {
-      // More flexible handling based on what's returned
-      if (typeof analysisResult === 'object') {
-        console.log("Using result object directly");
-        completeAnalysis(analysisResult);
-        navigate(`/takeoff-result/${newProject.id}`);
-      } else {
-        throw new Error(`Unexpected result type: ${typeof analysisResult}`);
+    // Start polling for results
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await axios.get(
+          `/.netlify/functions/get-analysis-result?projectId=${newProject.id}`
+        );
+        
+        // If we got a 200 response, we have results
+        console.log("Poll response:", response.status, response.data);
+        
+        if (response.status === 200) {
+          clearInterval(pollInterval);
+          completeAnalysis(response.data);
+          navigate(`/takeoff-result/${newProject.id}`);
+        }
+      } catch (error) {
+        // If we get a 404, results aren't ready yet
+        if (error.response && error.response.status === 404) {
+          console.log("Results not ready yet, continuing to poll...");
+        } else {
+          console.error("Error polling for results:", error);
+        }
       }
-    } else {
-      throw new Error('Analysis completed but returned no result');
-    }
+    }, 5000); // Check every 5 seconds
+    
+    // Store the interval in state so we can clear it if component unmounts
+    setPollingInterval(pollInterval);
+    
+    // Make sure to clear the interval when component unmounts
+    return () => clearInterval(pollInterval);
   } catch (error) {
-    console.error('Error during analysis:', error);
-    alert(`Analysis failed: ${error.message}`);
+    console.error('Error starting analysis:', error);
+    alert(`Failed to start analysis: ${error.message}`);
     startAnalysis(false);
   }
 };
