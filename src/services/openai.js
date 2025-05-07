@@ -1,17 +1,19 @@
 // src/services/openai.js
-
 import axios from 'axios';
 
 /**
  * Start the roof analysis process using a background function
  * @param {Array} files - Array of uploaded files
  * @param {Object} projectDetails - Details about the project
- * @returns {String} - The ID of the analysis job
+ * @returns {Object} - Response with project ID and status
  */
 export async function analyzeRoofPlans(files, projectDetails) {
   try {
+    console.log("Starting analysis with files:", files.map(f => f.name));
+    
     // Get the first image file
     const imageFile = files.find(file => file.type.startsWith('image/'));
+    console.log("Selected image file:", imageFile?.name);
     
     if (!imageFile) {
       throw new Error('No image files provided');
@@ -19,12 +21,15 @@ export async function analyzeRoofPlans(files, projectDetails) {
     
     // Convert to base64
     const base64Image = await fileToBase64(imageFile);
+    console.log("Image converted to base64, length:", base64Image.length);
     
     // Call the background function
     const response = await axios.post('/.netlify/functions/analyze-roof-background', {
       image: base64Image,
       projectDetails
     });
+    
+    console.log("Background function response:", response.status, response.data);
     
     return response.data;
   } catch (error) {
@@ -40,7 +45,11 @@ export async function analyzeRoofPlans(files, projectDetails) {
  */
 export async function checkAnalysisStatus(projectId) {
   try {
-    const response = await axios.get(`/.netlify/functions/store-analysis-result?projectId=${projectId}`);
+    console.log("Checking analysis status for project:", projectId);
+    
+    const response = await axios.get(`/.netlify/functions/get-analysis-result?projectId=${projectId}`);
+    console.log("Status check response:", response.data);
+    
     return response.data;
   } catch (error) {
     console.error('Error checking analysis status:', error);
