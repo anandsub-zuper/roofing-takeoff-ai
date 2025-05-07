@@ -63,7 +63,6 @@ export function AppProvider({ children }) {
   console.log("Result has properties:", Object.keys(result).join(", "));
   setIsProcessing(false);
   setAnalysisResult(result);
-};
     if (currentProject) {
       updateProjectStatus(currentProject.id, 'analyzed');
     }
