@@ -3,7 +3,30 @@
   publish = "build"
   functions = "netlify/functions"
 
+[functions]
+  # Increase timeout to the maximum 26 seconds
+  timeout = 26
+  # Use esbuild for faster bundling
+  node_bundler = "esbuild"
+  # Increase function size limit if needed
+  included_files = ["node_modules/**"]
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Optional: Performance optimizations
+[build.processing]
+  skip_processing = false
+
+[build.processing.css]
+  bundle = true
+  minify = true
+
+[build.processing.js]
+  bundle = true
+  minify = true
+
+[build.processing.images]
+  compress = true
