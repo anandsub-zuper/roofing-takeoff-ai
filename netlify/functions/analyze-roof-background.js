@@ -1,40 +1,67 @@
-// netlify/functions/analyze-roof.js
+// netlify/functions/analyze-roof-background.js
 const { OpenAI } = require('openai');
 
+// Global variable to store results (non-persistent)
+global.analysisResults = global.analysisResults || {};
+
 exports.handler = async function(event, context) {
-  // Add detailed logging
-  console.log("Function invoked with method:", event.httpMethod);
+  // This is a background function - Netlify won't wait for it to complete
+  console.log("Background function invoked");
   
-  // Check for POST method
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
   try {
-    // Parse request body
     const body = JSON.parse(event.body);
-    console.log("Request received. Image data length:", body.image ? body.image.length : 'no image data');
+    const { image, projectDetails } = body;
     
-    if (!body.image) {
-      return { 
-        statusCode: 400, 
-        body: JSON.stringify({ error: 'Image data is required' }) 
-      };
+    console.log("Request received for project:", projectDetails?.name);
+    
+    if (!image) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Image data is required' }) };
     }
     
-    // Check API key
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error("API key is missing");
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: 'API configuration error' })
-      };
-    }
+    // Return immediately to client
+    // Background processing will continue
+    console.log("Returning immediate response while processing continues");
     
-    // Initialize OpenAI with server-side API key
+    // Process in background (doesn't block response)
+    processInBackground(image, projectDetails).catch(error => {
+      console.error('Background processing error:', error);
+      
+      // Store the error
+      global.analysisResults[projectDetails.projectId] = {
+        error: error.message,
+        timestamp: Date.now(),
+        status: 'failed'
+      };
+    });
+    
+    return {
+      statusCode: 202,
+      body: JSON.stringify({ 
+        message: 'Analysis started', 
+        status: 'processing',
+        projectId: projectDetails.projectId
+      })
+    };
+  } catch (error) {
+    console.error('Error starting analysis:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Failed to start analysis' })
+    };
+  }
+};
+
+async function processInBackground(image, projectDetails) {
+  try {
+    console.log("Starting background processing");
+    
+    // Initialize OpenAI API
     const openai = new OpenAI({
-      apiKey: apiKey
+      apiKey: process.env.OPENAI_API_KEY
     });
     
     console.log("Calling OpenAI API...");
@@ -52,12 +79,12 @@ exports.handler = async function(event, context) {
           content: [
             { 
               type: "text", 
-              text: `Analyze this roof plan for project "${body.projectDetails?.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
+              text: `Analyze this roof plan for project "${projectDetails.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
             },
             {
               type: "image_url",
               image_url: {
-                url: body.image
+                url: image
               }
             }
           ]
@@ -65,29 +92,144 @@ exports.handler = async function(event, context) {
       ],
       max_tokens: 1500
     });
-    
+
     console.log("OpenAI API response received");
     
-    // Return the successful response
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        success: true,
-        result: response.choices[0].message.content,
-        // Add more structured data as needed
-      })
-    };
-  } catch (error) {
-    console.error('Error processing roof image:', error);
+    // Process the response
+    const analysisText = response.choices[0].message.content;
     
-    // Provide detailed error information
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ 
-        error: 'Failed to process roof image',
-        details: error.message,
-        stack: error.stack
-      })
+    // Extract structured data
+    const result = {
+      totalArea: extractAreaFromText(analysisText) || 2000,
+      pitch: extractPitchFromText(analysisText) || 4.0,
+      sections: extractSectionsFromText(analysisText) || [{
+        name: "Main Roof",
+        area: 2000,
+        pitch: 4.0
+      }],
+      materials: extractMaterialsFromText(analysisText) || {
+        shingles: { quantity: 20, unit: 'squares', unitPrice: 95.50 },
+        underlayment: { quantity: 22, unit: 'rolls', unitPrice: 45.75 },
+        nails: { quantity: 30, unit: 'lbs', unitPrice: 3.80 }
+      },
+      rawAnalysis: analysisText
     };
+    
+    console.log("Analysis complete, storing results in memory");
+    
+    // Store the result in global variable
+    global.analysisResults[projectDetails.projectId] = {
+      result,
+      timestamp: Date.now(),
+      status: 'completed'
+    };
+    
+    console.log(`Stored result for project ${projectDetails.projectId} in memory`);
+  } catch (error) {
+    console.error('Error in background processing:', error);
+    throw error;
   }
-};
+}
+
+// Helper functions for parsing OpenAI responses
+function extractAreaFromText(text) {
+  const areaMatch = text.match(/total\s+area.*?(\d[\d,\.]+)\s*(?:sq\.?\s*ft|square\s*feet)/i);
+  return areaMatch ? parseFloat(areaMatch[1].replace(/,/g, '')) : 0;
+}
+
+function extractPitchFromText(text) {
+  const pitchMatch = text.match(/pitch.*?(\d+(?:\.\d+)?)[:/]12/i);
+  return pitchMatch ? parseFloat(pitchMatch[1]) : 0;
+}
+
+function extractSectionsFromText(text) {
+  const sections = [];
+  
+  const sectionMatches = text.matchAll(/(?:section|area)(?:[:\s-]+)([^:]+?)(?::|is|measures|approximately|about).*?(\d[\d,\.]+)\s*(?:sq\.?\s*ft|square\s*feet)/gi);
+  
+  for (const match of sectionMatches) {
+    sections.push({
+      name: match[1].trim(),
+      area: parseFloat(match[2].replace(/,/g, '')),
+      pitch: 0
+    });
+  }
+  
+  if (sections.length === 0) {
+    const totalArea = extractAreaFromText(text);
+    if (totalArea > 0) {
+      sections.push({
+        name: "Main Roof",
+        area: totalArea,
+        pitch: extractPitchFromText(text)
+      });
+    }
+  }
+  
+  return sections;
+}
+
+function extractMaterialsFromText(text) {
+  const materials = {};
+  
+  const materialTypes = [
+    'shingles', 'tiles', 'underlayment', 'felt', 'nails', 
+    'ridge', 'vents', 'flashing', 'drip edge'
+  ];
+  
+  for (const material of materialTypes) {
+    const regex = new RegExp(`${material}.*?(?:need|require|approximately|about|:)\\s*(\\d+(?:\\.\\d+)?)\\s*((?:squares|bundles|rolls|pieces|lbs|kg|feet|ft))?`, 'i');
+    const match = text.match(regex);
+    
+    if (match) {
+      materials[material] = {
+        quantity: parseFloat(match[1]),
+        unit: match[2] ? match[2].trim().toLowerCase() : 'pieces',
+        unitPrice: getDefaultPrice(material)
+      };
+    }
+  }
+  
+  if (Object.keys(materials).length === 0) {
+    const totalArea = extractAreaFromText(text);
+    if (totalArea > 0) {
+      const squares = Math.ceil(totalArea / 100);
+      
+      materials.shingles = {
+        quantity: squares,
+        unit: 'squares',
+        unitPrice: 95.50
+      };
+      
+      materials.underlayment = {
+        quantity: Math.ceil(squares * 1.15),
+        unit: 'rolls',
+        unitPrice: 45.75
+      };
+      
+      materials.nails = {
+        quantity: Math.ceil(squares * 1.5),
+        unit: 'lbs',
+        unitPrice: 3.80
+      };
+    }
+  }
+  
+  return materials;
+}
+
+function getDefaultPrice(material) {
+  const prices = {
+    shingles: 95.50,
+    tiles: 125.00,
+    underlayment: 45.75,
+    felt: 35.20,
+    nails: 3.80,
+    ridge: 32.25,
+    vents: 42.00,
+    flashing: 18.50,
+    'drip edge': 8.75
+  };
+  
+  return prices[material.toLowerCase()] || 20.00;
+}
