@@ -1,9 +1,15 @@
 // netlify/functions/analyze-roof-background.js
 const { OpenAI } = require('openai');
+const fs = require('fs');
+const path = require('path');
 
 // Global variable to store results (non-persistent)
 global.analysisResults = global.analysisResults || {};
-
+global.analysisResults[projectDetails.projectId] = {
+  result,
+  timestamp: Date.now(),
+  status: 'completed'
+};
 exports.handler = async function(event, context) {
   // This is a background function with longer timeout
   console.log("Background function invoked");
@@ -30,6 +36,20 @@ exports.handler = async function(event, context) {
       const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY
       });
+
+      try {
+  const tmpDir = '/tmp';
+  // Ensure directory exists
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir, { recursive: true });
+  }
+  
+  const resultFile = path.join(tmpDir, `result-${projectDetails.projectId}.json`);
+  fs.writeFileSync(resultFile, JSON.stringify(result));
+  console.log(`Result also stored in file: ${resultFile}`);
+} catch (fileError) {
+  console.error('Error writing result to file:', fileError);
+}
       
       console.log("Calling OpenAI API...");
       
