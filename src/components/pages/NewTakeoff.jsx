@@ -1,8 +1,7 @@
 // src/components/pages/NewTakeoff.jsx
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Cloud, Calculator, X, FileText } from 'lucide-react';
+import { Upload, Cloud, Calculator, X, FileText, RefreshCw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { analyzeRoofPlans, checkAnalysisStatus } from '../../services/openai';
 
@@ -26,56 +25,9 @@ function NewTakeoff() {
     type: 'Residential'
   });
   
-  const [analysisId, setAnalysisId] = useState(null);
-  const [pollingInterval, setPollingInterval] = useState(null);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
-  
-  // Setup polling for analysis status
-  useEffect(() => {
-    if (analysisId && isProcessing) {
-      // Start polling
-      const interval = setInterval(async () => {
-        try {
-          const status = await checkAnalysisStatus(analysisId);
-          
-          setAnalysisProgress(status.progress || 0);
-          
-          if (status.status === 'completed') {
-            // Analysis is complete
-            clearInterval(interval);
-            completeAnalysis(status.result);
-            
-            // Navigate to results page
-            if (status.projectId) {
-              navigate(`/takeoff-result/${status.projectId}`);
-            }
-          } else if (status.status === 'failed') {
-            // Analysis failed
-            clearInterval(interval);
-            alert(`Analysis failed: ${status.error || 'Unknown error'}`);
-            startAnalysis(false);
-          }
-        } catch (error) {
-          console.error('Error polling analysis status:', error);
-          // Continue polling even if there's an error
-        }
-      }, 3000); // Check every 3 seconds
-      
-      setPollingInterval(interval);
-      
-      // Clean up interval on unmount
-      return () => clearInterval(interval);
-    }
-  }, [analysisId, isProcessing]);
-  
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-    };
-  }, [pollingInterval]);
+  const [currentProject, setCurrentProject] = useState(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusCheckCount, setStatusCheckCount] = useState(0);
   
   // Handle project details changes
   const handleInputChange = (e) => {
@@ -85,6 +37,22 @@ function NewTakeoff() {
       [name]: value
     });
   };
+  
+  // Automatically poll for status updates
+  useEffect(() => {
+    let interval;
+    
+    if (isProcessing && currentProject?.id) {
+      interval = setInterval(() => {
+        checkStatus(currentProject.id);
+        setStatusCheckCount(prev => prev + 1);
+      }, 10000); // Check every 10 seconds
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isProcessing, currentProject]);
   
   // Handle file upload
   const handleFileUpload = (e) => {
@@ -98,6 +66,31 @@ function NewTakeoff() {
       }));
       
       updateFiles(newFiles);
+    }
+  };
+  
+  // Check analysis status
+  const checkStatus = async (projectId) => {
+    if (checkingStatus) return;
+    
+    try {
+      setCheckingStatus(true);
+      console.log("Manually checking status for project:", projectId);
+      
+      const status = await checkAnalysisStatus(projectId);
+      console.log("Status check result:", status);
+      
+      if (status.status === 'completed' && status.result) {
+        // Analysis is complete
+        completeAnalysis(status.result);
+        
+        // Navigate to results page
+        navigate(`/takeoff-result/${projectId}`);
+      }
+    } catch (error) {
+      console.error("Error checking status:", error);
+    } finally {
+      setCheckingStatus(false);
     }
   };
   
@@ -118,24 +111,34 @@ function NewTakeoff() {
     try {
       // Create a new project
       const newProject = addProject(projectDetails);
+      setCurrentProject(newProject);
       
       // Start analysis process
       startAnalysis();
       
       // Call the background function to analyze files
-      const jobId = await analyzeRoofPlans(files.map(f => f.data), {
+      const response = await analyzeRoofPlans(files.map(f => f.data), {
         ...projectDetails,
         projectId: newProject.id
       });
       
-      // Store the analysis ID for polling
-      setAnalysisId(jobId);
+      console.log("Analysis started:", response);
+      
+      // First status check after 10 seconds
+      setTimeout(() => {
+        checkStatus(newProject.id);
+      }, 10000);
       
     } catch (error) {
       console.error('Error during analysis:', error);
       alert(`Analysis failed: ${error.message}`);
       startAnalysis(false);
     }
+  };
+  
+  const getPollingStatus = () => {
+    if (statusCheckCount === 0) return '';
+    return `Checking status (${statusCheckCount})...`;
   };
   
   return (
@@ -250,6 +253,7 @@ function NewTakeoff() {
                     <button 
                       className="text-red-500 hover:text-red-700"
                       onClick={() => removeFile(index)}
+                      disabled={isProcessing}
                     >
                       <X size={18} />
                     </button>
@@ -257,23 +261,45 @@ function NewTakeoff() {
                 ))}
               </div>
               
-              <button 
-                className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2 disabled:bg-blue-300"
-                onClick={processFiles}
-                disabled={isProcessing}
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                    Processing Files... {analysisProgress > 0 ? `${Math.round(analysisProgress)}%` : ''}
-                  </>
-                ) : (
-                  <>
-                    <Calculator size={18} />
-                    Process with AI
-                  </>
-                )}
-              </button>
+              {!isProcessing ? (
+                <button 
+                  className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                  onClick={processFiles}
+                >
+                  <Calculator size={18} />
+                  Process with AI
+                </button>
+              ) : (
+                <div className="mt-4">
+                  <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                    <div className="flex items-center justify-center mb-2">
+                      <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
+                      <p className="text-blue-700">Processing Files... {getPollingStatus()}</p>
+                    </div>
+                    <p className="text-sm text-center text-gray-600">
+                      Analysis is running in the background and may take 1-2 minutes.
+                    </p>
+                  </div>
+                  
+                  <button 
+                    className="w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:bg-green-300"
+                    onClick={() => currentProject && checkStatus(currentProject.id)}
+                    disabled={checkingStatus}
+                  >
+                    {checkingStatus ? (
+                      <>
+                        <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                        Checking Status...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={18} />
+                        Check if Analysis is Complete
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
