@@ -232,6 +232,32 @@ const processFiles = async () => {
                 onClick={processFiles}
                 disabled={isProcessing}
               >
+                <button 
+  onClick={async () => {
+    try {
+      const response = await axios.get(
+        `/.netlify/functions/get-analysis-result?projectId=${currentProject.id}`
+      );
+      
+      if (response.status === 200) {
+        completeAnalysis(response.data);
+        navigate(`/takeoff-result/${currentProject.id}`);
+      } else {
+        alert("Results not ready yet. Please wait a bit longer.");
+      }
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        alert("Results not ready yet. Please wait a bit longer.");
+      } else {
+        console.error("Error checking results:", error);
+        alert(`Error checking results: ${error.message}`);
+      }
+    }
+  }}
+  className="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition"
+>
+  Check for Results
+</button>
                 {isProcessing ? (
                   <>
                     <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
