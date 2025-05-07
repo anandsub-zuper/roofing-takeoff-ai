@@ -95,12 +95,8 @@ exports.handler = async function(event, context) {
       
       // Return success with result
       return {
-        statusCode: 200,
-        body: JSON.stringify({
-          status: 'completed',
-          result: result,
-          projectId: projectDetails.projectId
-        })
+      statusCode: 200,
+      body: JSON.stringify(result)
       };
       
     } catch (processError) {
