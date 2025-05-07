@@ -5,7 +5,7 @@ import axios from 'axios';
  * Start the roof analysis process using a background function
  * @param {Array} files - Array of uploaded files
  * @param {Object} projectDetails - Details about the project
- * @returns {Object} - Response with project ID and status
+ * @returns {Object} - Response with analysis results
  */
 export async function analyzeRoofPlans(files, projectDetails) {
   try {
@@ -23,40 +23,18 @@ export async function analyzeRoofPlans(files, projectDetails) {
     const base64Image = await fileToBase64(imageFile);
     console.log("Image converted to base64, length:", base64Image.length);
     
-    // Call the background function
+    // Call the background function and wait for it to complete
+    console.log("Calling background function and waiting for completion...");
     const response = await axios.post('/.netlify/functions/analyze-roof-background', {
       image: base64Image,
       projectDetails
     });
     
-    console.log("Background function response:", response.status, response.data);
+    console.log("Received complete response from background function:", response.status);
     
     return response.data;
   } catch (error) {
-    console.error('Error starting roof analysis:', error);
-    throw error;
-  }
-}
-
-/**
- * Check the status of an analysis job
- * @param {String} projectId - ID of the project
- * @returns {Promise<Object>} - Current status and result if available
- */
-export async function checkAnalysisStatus(projectId) {
-  try {
-    console.log("Checking analysis status for project:", projectId);
-    
-    const response = await axios.get(`/.netlify/functions/get-analysis-result?projectId=${projectId}`);
-    console.log("Status check response:", response.data);
-    
-    return response.data;
-  } catch (error) {
-    console.error('Error checking analysis status:', error);
-    // If we get a 404, the result is not ready yet
-    if (error.response && error.response.status === 404) {
-      return { status: 'processing' };
-    }
+    console.error('Error analyzing roof plans:', error);
     throw error;
   }
 }
