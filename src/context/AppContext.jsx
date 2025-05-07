@@ -59,9 +59,11 @@ export function AppProvider({ children }) {
   
   // Complete analysis
   const completeAnalysis = (result) => {
-    setIsProcessing(false);
-    setAnalysisResult(result);
-    
+  console.log("Complete analysis called with result type:", typeof result);
+  console.log("Result has properties:", Object.keys(result).join(", "));
+  setIsProcessing(false);
+  setAnalysisResult(result);
+};
     if (currentProject) {
       updateProjectStatus(currentProject.id, 'analyzed');
     }
