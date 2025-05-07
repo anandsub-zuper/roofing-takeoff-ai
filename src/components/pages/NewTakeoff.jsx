@@ -79,12 +79,9 @@ function NewTakeoff() {
       console.log("Analysis complete:", response);
       
       // Process the completed analysis
-      if (response.status === 'completed' && response.result) {
-        // Set the analysis result
-        completeAnalysis(response.result);
-        
-        // Navigate to results page
-        navigate(`/takeoff-result/${newProject.id}`);
+      if (response) {
+      completeAnalysis(response);
+      navigate(`/takeoff-result/${newProject.id}`);
       } else {
         throw new Error('Analysis completed but returned invalid result');
       }
