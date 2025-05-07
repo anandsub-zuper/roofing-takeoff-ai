@@ -2,6 +2,9 @@
 const { OpenAI } = require('openai');
 
 exports.handler = async function(event, context) {
+  // Add detailed logging
+  console.log("Function invoked with method:", event.httpMethod);
+  
   // Check for POST method
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
@@ -10,19 +13,31 @@ exports.handler = async function(event, context) {
   try {
     // Parse request body
     const body = JSON.parse(event.body);
-    const { image, projectDetails } = body;
+    console.log("Request received. Image data length:", body.image ? body.image.length : 'no image data');
     
-    if (!image) {
+    if (!body.image) {
       return { 
         statusCode: 400, 
         body: JSON.stringify({ error: 'Image data is required' }) 
       };
     }
     
+    // Check API key
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error("API key is missing");
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'API configuration error' })
+      };
+    }
+    
     // Initialize OpenAI with server-side API key
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+      apiKey: apiKey
     });
+    
+    console.log("Calling OpenAI API...");
     
     // Call OpenAI API
     const response = await openai.chat.completions.create({
@@ -37,12 +52,12 @@ exports.handler = async function(event, context) {
           content: [
             { 
               type: "text", 
-              text: `Analyze this roof plan for project "${projectDetails?.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
+              text: `Analyze this roof plan for project "${body.projectDetails?.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
             },
             {
               type: "image_url",
               image_url: {
-                url: image
+                url: body.image
               }
             }
           ]
@@ -51,45 +66,28 @@ exports.handler = async function(event, context) {
       max_tokens: 1500
     });
     
-    // Process and extract structured data
-    const analysisText = response.choices[0].message.content;
-    const structuredData = {
-      totalArea: extractAreaFromText(analysisText),
-      pitch: extractPitchFromText(analysisText),
-      sections: extractSectionsFromText(analysisText),
-      materials: extractMaterialsFromText(analysisText),
-      rawAnalysis: analysisText
-    };
+    console.log("OpenAI API response received");
     
+    // Return the successful response
     return {
       statusCode: 200,
-      body: JSON.stringify(structuredData)
+      body: JSON.stringify({
+        success: true,
+        result: response.choices[0].message.content,
+        // Add more structured data as needed
+      })
     };
   } catch (error) {
     console.error('Error processing roof image:', error);
     
+    // Provide detailed error information
     return {
       statusCode: 500,
       body: JSON.stringify({ 
         error: 'Failed to process roof image',
-        details: error.message 
+        details: error.message,
+        stack: error.stack
       })
     };
   }
 };
-
-// Helper functions for parsing OpenAI responses
-function extractAreaFromText(text) {
-  // Simple regex to find area values
-  const areaMatch = text.match(/total\s+area.*?(\d[\d,\.]+)\s*(?:sq\.?\s*ft|square\s*feet)/i);
-  return areaMatch ? parseFloat(areaMatch[1].replace(/,/g, '')) : 0;
-}
-
-function extractPitchFromText(text) {
-  // Simple regex to find pitch values
-  const pitchMatch = text.match(/pitch.*?(\d+(?:\.\d+)?)[:/]12/i);
-  return pitchMatch ? parseFloat(pitchMatch[1]) : 0;
-}
-
-// Include the other helper functions from your original code
-// extractSectionsFromText and extractMaterialsFromText
