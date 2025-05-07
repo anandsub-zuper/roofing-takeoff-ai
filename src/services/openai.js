@@ -1,7 +1,13 @@
 // src/services/openai.js
+
 import axios from 'axios';
 
-// Function to analyze roof plans
+/**
+ * Start the roof analysis process using a background function
+ * @param {Array} files - Array of uploaded files
+ * @param {Object} projectDetails - Details about the project
+ * @returns {String} - The ID of the analysis job
+ */
 export async function analyzeRoofPlans(files, projectDetails) {
   try {
     // Get the first image file
@@ -14,20 +20,41 @@ export async function analyzeRoofPlans(files, projectDetails) {
     // Convert to base64
     const base64Image = await fileToBase64(imageFile);
     
-    // Call our Netlify function
-    const response = await axios.post('/.netlify/functions/analyze-roof', {
+    // Call the background function
+    const response = await axios.post('/.netlify/functions/analyze-roof-background', {
       image: base64Image,
       projectDetails
     });
     
     return response.data;
   } catch (error) {
-    console.error('Error analyzing roof plans:', error);
+    console.error('Error starting roof analysis:', error);
     throw error;
   }
 }
 
-// Function to ask the AI assistant
+/**
+ * Check the status of an analysis job
+ * @param {String} projectId - ID of the project
+ * @returns {Promise<Object>} - Current status and result if available
+ */
+export async function checkAnalysisStatus(projectId) {
+  try {
+    const response = await axios.get(`/.netlify/functions/store-analysis-result?projectId=${projectId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error checking analysis status:', error);
+    // If we get a 404, the result is not ready yet
+    if (error.response && error.response.status === 404) {
+      return { status: 'processing' };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Ask AI Assistant a question about the analysis
+ */
 export async function askAssistant(question, roofData) {
   try {
     const response = await axios.post('/.netlify/functions/ask-assistant', {
@@ -42,7 +69,9 @@ export async function askAssistant(question, roofData) {
   }
 }
 
-// Helper function to convert file to base64
+/**
+ * Convert file to base64
+ */
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
