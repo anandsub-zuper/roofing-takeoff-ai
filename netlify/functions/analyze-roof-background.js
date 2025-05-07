@@ -3,15 +3,11 @@ const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
 
-// Global variable to store results (non-persistent)
+// Initialize global storage
 global.analysisResults = global.analysisResults || {};
-global.analysisResults[projectDetails.projectId] = {
-  result,
-  timestamp: Date.now(),
-  status: 'completed'
-};
+
 exports.handler = async function(event, context) {
-  // This is a background function with longer timeout
+  // This is a background function
   console.log("Background function invoked");
   
   if (event.httpMethod !== 'POST') {
@@ -28,126 +24,123 @@ exports.handler = async function(event, context) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Image data is required' }) };
     }
     
-    console.log("Starting OpenAI processing");
+    // Return immediately with 202 Accepted
+    console.log("Returning immediate 202 response, processing will continue");
     
-    // Process synchronously (waiting for completion)
-    try {
-      // Initialize OpenAI API
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY
-      });
-
-      try {
-  const tmpDir = '/tmp';
-  // Ensure directory exists
-  if (!fs.existsSync(tmpDir)) {
-    fs.mkdirSync(tmpDir, { recursive: true });
-  }
-  
-  const resultFile = path.join(tmpDir, `result-${projectDetails.projectId}.json`);
-  fs.writeFileSync(resultFile, JSON.stringify(result));
-  console.log(`Result also stored in file: ${resultFile}`);
-} catch (fileError) {
-  console.error('Error writing result to file:', fileError);
-}
-      
-      console.log("Calling OpenAI API...");
-      
-      // Call OpenAI API and wait for response
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert roofing contractor with extensive experience in measurements and material estimation. Analyze the provided roof plan or image and extract key measurements, identify roof sections, and provide material estimates."
-          },
-          {
-            role: "user",
-            content: [
-              { 
-                type: "text", 
-                text: `Analyze this roof plan for project "${projectDetails.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: image
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 1500
-      });
-
-      console.log("OpenAI API response received");
-      
-      // Process the response
-      const analysisText = response.choices[0].message.content;
-      
-      // Extract structured data
-      const result = {
-        totalArea: extractAreaFromText(analysisText) || 2000,
-        pitch: extractPitchFromText(analysisText) || 4.0,
-        sections: extractSectionsFromText(analysisText) || [{
-          name: "Main Roof",
-          area: 2000,
-          pitch: 4.0
-        }],
-        materials: extractMaterialsFromText(analysisText) || {
-          shingles: { quantity: 20, unit: 'squares', unitPrice: 95.50 },
-          underlayment: { quantity: 22, unit: 'rolls', unitPrice: 45.75 },
-          nails: { quantity: 30, unit: 'lbs', unitPrice: 3.80 }
-        },
-        rawAnalysis: analysisText
-      };
-      
-      console.log("Analysis complete, storing results in memory");
-      
-      // Store the result in global variable
-      global.analysisResults[projectDetails.projectId] = {
-        result,
-        timestamp: Date.now(),
-        status: 'completed'
-      };
-      
-      console.log(`Stored result for project ${projectDetails.projectId} in memory`);
-      
-      // Return success with result
-      return {
-      statusCode: 200,
-      body: JSON.stringify(result)
-      };
-      
-    } catch (processError) {
-      console.error('Error processing with OpenAI:', processError);
-      
-      // Store the error
-      global.analysisResults[projectDetails.projectId] = {
-        error: processError.message,
-        timestamp: Date.now(),
-        status: 'failed'
-      };
-      
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ 
-          error: 'Failed to process with OpenAI', 
-          details: processError.message 
-        })
-      };
-    }
+    // Process in background (after returning response)
+    processInBackground(image, projectDetails).catch(error => {
+      console.error('Background processing error:', error);
+    });
     
-  } catch (error) {
-    console.error('Error parsing request:', error);
     return {
-      statusCode: 400,
-      body: JSON.stringify({ error: 'Invalid request format' })
+      statusCode: 202,
+      body: JSON.stringify({ 
+        message: 'Analysis started', 
+        status: 'processing',
+        projectId: projectDetails.projectId
+      })
+    };
+  } catch (error) {
+    console.error('Error starting analysis:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Failed to start analysis' })
     };
   }
 };
 
-// Helper functions for parsing OpenAI responses
+async function processInBackground(image, projectDetails) {
+  try {
+    console.log("Starting background processing for project:", projectDetails.projectId);
+    
+    // Initialize OpenAI API
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    
+    console.log("Calling OpenAI API...");
+    
+    // Call OpenAI API
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert roofing contractor with extensive experience in measurements and material estimation. Analyze the provided roof plan or image and extract key measurements, identify roof sections, and provide material estimates."
+        },
+        {
+          role: "user",
+          content: [
+            { 
+              type: "text", 
+              text: `Analyze this roof plan for project "${projectDetails.name || 'Unnamed'}". Provide detailed measurements, identify different roof sections, calculate the total roof area, estimate the roof pitch, and recommend required materials.` 
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: image
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 1500
+    });
+
+    console.log("OpenAI API response received");
+    
+    // Process the response
+    const analysisText = response.choices[0].message.content;
+    
+    // Extract structured data (your existing functions)
+    const result = {
+      totalArea: extractAreaFromText(analysisText) || 2000,
+      pitch: extractPitchFromText(analysisText) || 4.0,
+      sections: extractSectionsFromText(analysisText) || [{
+        name: "Main Roof",
+        area: 2000,
+        pitch: 4.0
+      }],
+      materials: extractMaterialsFromText(analysisText) || {
+        shingles: { quantity: 20, unit: 'squares', unitPrice: 95.50 },
+        underlayment: { quantity: 22, unit: 'rolls', unitPrice: 45.75 },
+        nails: { quantity: 30, unit: 'lbs', unitPrice: 3.80 }
+      },
+      rawAnalysis: analysisText
+    };
+    
+    console.log("Analysis complete, storing results in memory");
+    
+    // Store in global variable
+    global.analysisResults[projectDetails.projectId] = {
+      result,
+      timestamp: Date.now(),
+      status: 'completed'
+    };
+
+    // Also store in file system as backup
+    try {
+      const tmpDir = '/tmp';
+      // Ensure directory exists
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      
+      const resultFile = path.join(tmpDir, `result-${projectDetails.projectId}.json`);
+      fs.writeFileSync(resultFile, JSON.stringify(result));
+      console.log(`Result also stored in file: ${resultFile}`);
+    } catch (fileError) {
+      console.error('Error writing result to file:', fileError);
+    }
+    
+    console.log(`Stored result for project ${projectDetails.projectId} in memory`);
+  } catch (error) {
+    console.error('Error in background processing:', error);
+    throw error;
+  }
+}
+
+// Helper functions
 function extractAreaFromText(text) {
   const areaMatch = text.match(/total\s+area.*?(\d[\d,\.]+)\s*(?:sq\.?\s*ft|square\s*feet)/i);
   return areaMatch ? parseFloat(areaMatch[1].replace(/,/g, '')) : 0;
