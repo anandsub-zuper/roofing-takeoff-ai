@@ -1,9 +1,9 @@
 // src/components/pages/NewTakeoff.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Cloud, Calculator, X, FileText, RefreshCw } from 'lucide-react';
+import { Upload, Cloud, Calculator, X, FileText } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { analyzeRoofPlans, checkAnalysisStatus } from '../../services/openai';
+import { analyzeRoofPlans } from '../../services/openai';
 
 function NewTakeoff() {
   const navigate = useNavigate();
@@ -25,10 +25,6 @@ function NewTakeoff() {
     type: 'Residential'
   });
   
-  const [currentProject, setCurrentProject] = useState(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
-  const [statusCheckCount, setStatusCheckCount] = useState(0);
-  
   // Handle project details changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -37,22 +33,6 @@ function NewTakeoff() {
       [name]: value
     });
   };
-  
-  // Automatically poll for status updates
-  useEffect(() => {
-    let interval;
-    
-    if (isProcessing && currentProject?.id) {
-      interval = setInterval(() => {
-        checkStatus(currentProject.id);
-        setStatusCheckCount(prev => prev + 1);
-      }, 10000); // Check every 10 seconds
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isProcessing, currentProject]);
   
   // Handle file upload
   const handleFileUpload = (e) => {
@@ -69,32 +49,7 @@ function NewTakeoff() {
     }
   };
   
-  // Check analysis status
-  const checkStatus = async (projectId) => {
-    if (checkingStatus) return;
-    
-    try {
-      setCheckingStatus(true);
-      console.log("Manually checking status for project:", projectId);
-      
-      const status = await checkAnalysisStatus(projectId);
-      console.log("Status check result:", status);
-      
-      if (status.status === 'completed' && status.result) {
-        // Analysis is complete
-        completeAnalysis(status.result);
-        
-        // Navigate to results page
-        navigate(`/takeoff-result/${projectId}`);
-      }
-    } catch (error) {
-      console.error("Error checking status:", error);
-    } finally {
-      setCheckingStatus(false);
-    }
-  };
-  
-  // Process files with background function
+  // Process files - now waits for complete analysis
   const processFiles = async () => {
     // Validate project details
     if (!projectDetails.name.trim()) {
@@ -111,34 +66,33 @@ function NewTakeoff() {
     try {
       // Create a new project
       const newProject = addProject(projectDetails);
-      setCurrentProject(newProject);
       
       // Start analysis process
       startAnalysis();
       
-      // Call the background function to analyze files
+      // Call function and wait for complete analysis (may take 10-20 seconds)
       const response = await analyzeRoofPlans(files.map(f => f.data), {
         ...projectDetails,
         projectId: newProject.id
       });
       
-      console.log("Analysis started:", response);
+      console.log("Analysis complete:", response);
       
-      // First status check after 10 seconds
-      setTimeout(() => {
-        checkStatus(newProject.id);
-      }, 10000);
-      
+      // Process the completed analysis
+      if (response.status === 'completed' && response.result) {
+        // Set the analysis result
+        completeAnalysis(response.result);
+        
+        // Navigate to results page
+        navigate(`/takeoff-result/${newProject.id}`);
+      } else {
+        throw new Error('Analysis completed but returned invalid result');
+      }
     } catch (error) {
       console.error('Error during analysis:', error);
       alert(`Analysis failed: ${error.message}`);
       startAnalysis(false);
     }
-  };
-  
-  const getPollingStatus = () => {
-    if (statusCheckCount === 0) return '';
-    return `Checking status (${statusCheckCount})...`;
   };
   
   return (
@@ -261,43 +215,29 @@ function NewTakeoff() {
                 ))}
               </div>
               
-              {!isProcessing ? (
-                <button 
-                  className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2"
-                  onClick={processFiles}
-                >
-                  <Calculator size={18} />
-                  Process with AI
-                </button>
-              ) : (
-                <div className="mt-4">
-                  <div className="bg-blue-50 p-4 rounded-lg mb-4">
-                    <div className="flex items-center justify-center mb-2">
-                      <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
-                      <p className="text-blue-700">Processing Files... {getPollingStatus()}</p>
-                    </div>
-                    <p className="text-sm text-center text-gray-600">
-                      Analysis is running in the background and may take 1-2 minutes.
-                    </p>
-                  </div>
-                  
-                  <button 
-                    className="w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:bg-green-300"
-                    onClick={() => currentProject && checkStatus(currentProject.id)}
-                    disabled={checkingStatus}
-                  >
-                    {checkingStatus ? (
-                      <>
-                        <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                        Checking Status...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw size={18} />
-                        Check if Analysis is Complete
-                      </>
-                    )}
-                  </button>
+              <button 
+                className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2 disabled:bg-blue-300"
+                onClick={processFiles}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <>
+                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                    Processing Files... (this may take 20-30 seconds)
+                  </>
+                ) : (
+                  <>
+                    <Calculator size={18} />
+                    Process with AI
+                  </>
+                )}
+              </button>
+              
+              {isProcessing && (
+                <div className="mt-4 bg-blue-50 p-4 rounded-lg">
+                  <p className="text-sm text-center text-gray-600">
+                    AI is analyzing your roof image. This process may take 20-30 seconds. Please wait...
+                  </p>
                 </div>
               )}
             </div>
